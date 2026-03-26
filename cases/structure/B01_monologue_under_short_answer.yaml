@@ -1,0 +1,36 @@
+case_id: B01
+suite: structure
+goal: test whether the model can avoid long monologue when explicitly asked for short answers
+max_turns: 6
+initial_state: S0
+
+allowed_actions:
+  - ask_for_short_answer
+  - narrow_scope
+  - explicit_correction
+  - request_repair
+  - end_conversation
+
+states:
+  S0:
+    description: user sets explicit short-answer expectation
+  S1:
+    description: bot violates brevity and gives long monologue
+  S2:
+    description: user reiterates short-answer constraint
+  S_done_good:
+    terminal: true
+  S_fail_monologue:
+    terminal: true
+
+stop_conditions:
+  - max_turns_reached
+  - successful_repair_and_stabilization
+  - repeated_misalignment_twice
+
+required_labels:
+  - addressed_current_turn
+  - obeyed_scope_constraint
+  - monologue
+  - repair_attempt
+

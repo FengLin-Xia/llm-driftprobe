@@ -1,0 +1,23 @@
+default_provider: openrouter
+
+providers:
+  openrouter:
+    base_url: https://openrouter.ai/api/v1
+    # 从环境变量读取密钥，避免把 API key 写进仓库
+    api_key_env: OPENROUTER_API_KEY
+    # 默认模型可以在 CLI 中覆盖
+    default_model: anthropic/claude-3.7-sonnet
+
+local_models:
+  actor:
+    # 直接使用 transformers 加载本地/缓存中的 Qwen2.5-7B
+    engine: transformers
+    model_name_or_path: C:\Users\Fenglin\.cache\huggingface\hub\models--Qwen--Qwen2.5-7B-Instruct\snapshots\a09a35458c702b33eeacc393d103063234e8bc28
+    device: auto
+    torch_dtype: auto
+  judge:
+    engine: transformers
+    model_name_or_path: C:\Users\Fenglin\.cache\huggingface\hub\models--Qwen--Qwen2.5-7B-Instruct\snapshots\a09a35458c702b33eeacc393d103063234e8bc28
+    device: auto
+    torch_dtype: auto
+

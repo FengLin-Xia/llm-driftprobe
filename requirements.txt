@@ -1,0 +1,12 @@
+fastapi==0.115.0
+uvicorn==0.30.0
+httpx==0.27.0
+PyYAML==6.0.2
+python-dotenv==1.0.1
+rich==13.9.2
+transformers
+accelerate
+safetensors
+gradio>=4.0
+pandas
+Brotli>=1.1.0

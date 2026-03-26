@@ -1,0 +1,63 @@
+2025-03-24 改动记录
+===================
+
+## 0. README.md 全量更新
+
+README.md
+- 删除"占位"内容，补充真实项目状态
+- 增加框架概览（三角色流程图）
+- 补充评估指标说明表（含方向）
+- 补充 Phase 2/3/4 对比表
+- 补充 Gradio UI 启动与使用说明（含自动存档路径）
+- 补充目录结构（含 ui/ 目录）
+- 补充已知限制说明
+
+
+## 1. 新建 Gradio UI（ui/ 目录）
+
+新增文件：
+- ui/__init__.py
+- ui/mock_backend.py     mock 数据，4 个 case（A01/B01/C01/D01）各有完整 transcript + turn_labels
+- ui/formatters.py       result dict → 展示用结构（overview md / transcript md / DataFrame / debug json）
+- ui/backend.py          真实后端 bridge，失败自动 fallback mock
+- ui/app.py              Gradio Blocks 主 app，左控制面板 + 右 4 标签页
+- ui/README.md           安装与运行说明
+
+requirements.txt 追加：gradio>=4.0, pandas
+
+
+## 2. UI bug 修复
+
+ui/backend.py
+- Phase 2 不跑 Judge，turn_labels 为空，导致分数全 0 触发 "Instruction Alignment Failure"
+- 修复：_infer_failure_mode / _build_summary 增加 has_labels 判断
+  - 无 labels 时显示 "N/A — no Judge labels (Phase 2)"，并提示切换 Phase 4
+
+
+## 3. 新增运行记录自动保存
+
+ui/backend.py
+- 每次 Run 后自动保存 markdown 报告到 data/reports/<run_id>.md
+- 每次 Run 后自动保存 transcript + turn_labels 到 data/runs/<run_id>.jsonl
+
+
+## 4. Python 3.12 弯引号兼容性修复（追加）
+
+src/runner/run_case.py
+- dict key "A01" 本身使用了 U+201C/U+201D 弯引号，Python 3.12 将其识别为字符串定界符导致 SyntaxError
+- 用脚本全量替换文件内所有 U+201C / U+201D 为 ASCII 双引号
+
+
+## 5. Actor 重复输出 bug 修复（三处）
+
+问题根因：actor 每轮看到的 prompt 完全相同，低 temperature 下输出 100% 重复。
+
+src/actor/engine.py
+- Bug 修复：user_prompt 中补充"可选的下一状态"列表（含各 state 的 description）
+  原因：prompt 里只有 allowed_actions，没有合法 states 列表，
+        导致 Qwen 输出的 state 字段无效，被 fallback 到 current_state，state 机器失效
+
+src/runner/run_case.py（Phase 3 循环 + Phase 4 循环，各一处）
+- Bug 修复：删除 runner 里对 next_state 的重复过滤
+  原因：actor/engine.py 内部已做 state 验证，runner 里再过滤一次
+        导致即使 actor 输出了合法 state，也可能被错误地打回 current_state

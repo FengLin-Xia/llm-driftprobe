@@ -1,0 +1,36 @@
+logging:
+  level: INFO
+
+paths:
+  data_dir: data
+  runs_dir: data/runs
+  transcripts_dir: data/transcripts
+  reports_dir: data/reports
+
+runner:
+  max_concurrent_runs: 1
+
+actor:
+  # 固定动作集合，避免 v0 范围膨胀
+  allowed_actions:
+    - narrow_scope
+    - explicit_correction
+    - ask_for_short_answer
+    - restate_constraint
+    - test_memory
+    - prohibit_flattery
+    - request_repair
+    - end_conversation
+
+judge:
+  # 主标签 6 个 + 辅助 2 个
+  required_labels:
+    - addressed_current_turn
+    - obeyed_scope_constraint
+    - monologue
+    - flattery
+    - repair_attempt
+    - continuity_masking
+    - context_recall
+    - fake_repair
+
