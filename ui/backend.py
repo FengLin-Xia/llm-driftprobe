@@ -26,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import sys
 import threading
+import traceback
 from pathlib import Path
 from typing import Any, Dict
 
@@ -177,11 +178,14 @@ def run_stress_test(
     max_turns: int,
     temperature: float,
     show_debug: bool = False,
+    strict_real_backend: bool = False,
 ) -> Dict[str, Any]:
     """
     Primary entry point for the Gradio UI.
 
-    Attempts to call the real backend. On any failure, falls back to mock.
+    Attempts to call the real backend.
+    - strict_real_backend=False: on failure, falls back to mock data.
+    - strict_real_backend=True: on failure, raises the backend exception directly.
     The 'target_model' string is assumed to be an OpenRouter model ID
     (e.g. "anthropic/claude-3.7-sonnet") served via the 'openrouter' provider.
     """
@@ -198,8 +202,19 @@ def run_stress_test(
         return _normalize_run_result(raw, target_model, phase, temperature)
 
     except Exception as exc:
-        # Real backend unavailable — fall back to mock with a note
+        # Always retain full diagnostics for debugging.
+        # str(exc) can be empty for some exception types, so keep repr + traceback.
+        exc_text = f"{repr(exc)}\n{traceback.format_exc()}"
+
+        if strict_real_backend:
+            raise RuntimeError(
+                "Real backend failed and strict mode is enabled.\n"
+                f"{exc_text}"
+            ) from exc
+
+        # Real backend unavailable — fall back to mock with detailed reason.
         from ui.mock_backend import run_stress_test as mock_run
         result = mock_run(target_model, case_id, phase, max_turns, temperature, show_debug)
-        result["_fallback_reason"] = str(exc)
+        result["_fallback_reason"] = exc_text
+        result["_backend_exception"] = repr(exc)
         return result

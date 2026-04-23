@@ -86,6 +86,7 @@ def handle_run(
     max_turns: int,
     temperature: float,
     show_debug: bool,
+    strict_real_backend: bool,
 ) -> Tuple[str, str, str, Any, str, str]:
     """
     Called when the user clicks Run.
@@ -103,6 +104,7 @@ def handle_run(
             max_turns=int(max_turns),
             temperature=float(temperature),
             show_debug=show_debug,
+            strict_real_backend=strict_real_backend,
         )
     except Exception:
         err = traceback.format_exc()
@@ -200,6 +202,11 @@ def build_app() -> gr.Blocks:
                     label="Show Debug Output",
                     value=False,
                 )
+                strict_real_cb = gr.Checkbox(
+                    label="Strict Real Backend (no mock fallback)",
+                    value=False,
+                    info="When enabled, backend errors are shown directly instead of falling back to mock data.",
+                )
 
                 run_btn = gr.Button(
                     "▶  Run Stress Test",
@@ -263,7 +270,7 @@ def build_app() -> gr.Blocks:
         # ── Event wiring ────────────────────────────────────────────────────
         run_btn.click(
             fn=handle_run,
-            inputs=[model_dd, case_dd, phase_radio, max_turns_slider, temp_slider, debug_cb],
+            inputs=[model_dd, case_dd, phase_radio, max_turns_slider, temp_slider, debug_cb, strict_real_cb],
             outputs=[status_box, overview_md, transcript_md, labels_df, report_md, debug_out],
         )
 
