@@ -11,6 +11,7 @@ from .prompt import JUDGE_SYSTEM_PROMPT
 @dataclass
 class JudgeConfig:
     model: str
+    provider: str = "local/transformers"
 
 
 class JudgeEngine:
@@ -64,7 +65,7 @@ turn_index: {turn_index}
 
         resp = await self._adapter.chat(
             {
-                "provider": "local/transformers",
+                "provider": self._config.provider,
                 "model": self._config.model,
                 "messages": messages,
                 "temperature": 0.0,

@@ -1,0 +1,8 @@
+providers:
+  openrouter:
+    # Copy this file to configs/models.local.yaml and fill in your local key.
+    # configs/models.local.yaml is gitignored.
+    api_key: sk-or-v1-...
+
+  deepseek:
+    api_key: sk-...

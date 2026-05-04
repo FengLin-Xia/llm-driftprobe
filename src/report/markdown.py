@@ -7,7 +7,9 @@ from ..scorer.metrics import compute_case_metrics
 
 
 def render_markdown_report(run_result: Dict) -> str:
-    metrics = compute_case_metrics(run_result.get("turn_labels", []))
+    case_spec = run_result.get("case_spec", {}) or {}
+    extension_metrics = case_spec.get("extension_metrics", []) or []
+    metrics = compute_case_metrics(run_result.get("turn_labels", []), extension_metrics=extension_metrics)
 
     lines = [
         f"Target Model: {run_result['model']}",
@@ -15,13 +17,48 @@ def render_markdown_report(run_result: Dict) -> str:
         f"Status: {run_result['status']}",
         f"Turns: {run_result.get('turn_count', 0)}",
         "",
-        f"turn_alignment_score: {metrics['turn_alignment_score']:.2f}",
-        f"repair_score: {metrics['repair_score']:.2f}",
-        f"context_honesty_score: {metrics['context_honesty_score']:.2f}",
-        f"continuity_masking_score: {metrics['continuity_masking_score']:.2f}",
-        f"flattery_noise_rate: {metrics['flattery_noise_rate']:.2f}",
-        f"monologue_persistence_rate: {metrics['monologue_persistence_rate']:.2f}",
     ]
+
+    phenomenon = case_spec.get("phenomenon")
+    seed_scenario = case_spec.get("seed_scenario")
+    observation_focus = case_spec.get("observation_focus")
+    transition_windows = case_spec.get("transition_windows", []) or []
+
+    if phenomenon or seed_scenario or observation_focus:
+        lines.extend(["Phenomenon Summary:", ""])
+        if phenomenon:
+            lines.append(f"- phenomenon: {phenomenon}")
+        if seed_scenario:
+            lines.append(f"- seed_scenario: {seed_scenario}")
+        if observation_focus:
+            lines.append(f"- observation_focus: {observation_focus}")
+        lines.append("")
+
+    lines.extend(
+        [
+            f"turn_alignment_score: {_format_metric(metrics.get('turn_alignment_score'))}",
+            f"repair_score: {_format_metric(metrics.get('repair_score'))}",
+            f"context_honesty_score: {_format_metric(metrics.get('context_honesty_score'))}",
+            f"continuity_masking_score: {_format_metric(metrics.get('continuity_masking_score'))}",
+            f"flattery_noise_rate: {_format_metric(metrics.get('flattery_noise_rate'))}",
+            f"monologue_persistence_rate: {_format_metric(metrics.get('monologue_persistence_rate'))}",
+        ]
+    )
+
+    if extension_metrics:
+        lines.extend(["", "Extension Metrics:"])
+        for name in extension_metrics:
+            lines.append(f"- {name}: {_format_metric(metrics.get(name))}")
+
+    if transition_windows:
+        lines.extend(["", "Transition Windows:"])
+        for window in transition_windows:
+            if not isinstance(window, dict):
+                continue
+            from_turn = window.get("from_turn", "?")
+            to_turn = window.get("to_turn", "?")
+            focus = window.get("focus", window.get("observation_focus", ""))
+            lines.append(f"- Turn {from_turn} -> {to_turn}: {focus}")
 
     transcript = run_result.get("transcript") or []
     if transcript:
@@ -40,6 +77,15 @@ def render_markdown_report(run_result: Dict) -> str:
             lines.append(f"- Turn {turn_index} - assistant: {assistant_short}")
 
     return "\n".join(lines)
+
+
+def _format_metric(value: object) -> str:
+    if value is None:
+        return "n/a"
+    try:
+        return f"{float(value):.2f}"
+    except Exception:
+        return "n/a"
 
 
 def save_markdown_report(run_result: Dict, path: Path) -> None:

@@ -1,0 +1,182 @@
+2026-05-04 DriftProbe refactor prep notes
+
+Context
+- Added the preflight decision checklist to DriftProbe_Refactor_Plan_v2.md.
+- Started the first six infrastructure changes that do not depend on the concrete E02 transcript.
+
+Implemented
+1. Generic case loader
+   - src/runner/run_case.py now scans cases/**/*.yaml by case_id.
+   - Removed the hard-coded A01/B01/C01/D01 path mapping.
+   - Duplicate case_id values now raise an explicit error.
+
+2. New case spec field compatibility
+   - Runner and report can now tolerate new fields such as:
+     phenomenon, seed_scenario, observation_focus, transition_windows, extension_metrics.
+   - Existing old case specs remain valid.
+
+3. Fixed-script runner path
+   - If a case spec contains interaction_script, runner executes those user turns directly.
+   - Supported step forms:
+     - plain string
+     - dict with user_message, message, or content
+   - Optional per-step metadata such as action, note, state_before, state_after is carried into transcript entries.
+
+4. Adapter capability skeleton
+   - BaseChatAdapter now exposes provider_name, model_name, supports_stream, supports_tools, supports_search, supports_reasoning_summary, and metadata.
+   - OpenAILikeAdapter and TransformersLocalAdapter set conservative default capability values.
+
+5. Observations compatibility
+   - run_single_case now returns observations in addition to the old turn_labels field.
+   - Scripted phase4 turn judge outputs are mirrored into observations with unit=turn.
+   - transition_windows from case specs are mirrored into observations with unit=transition and source=case_spec.
+
+6. Core + extension scorer entry
+   - compute_case_metrics keeps old core metrics.
+   - It now accepts extension_metrics.
+   - correction_uptake_score maps to turn label correction_uptake.
+   - prior_frame_persistence_rate maps to turn label prior_frame_persistence.
+   - Unknown extension metrics return None instead of breaking the pipeline.
+
+7. Report compatibility
+   - Markdown reports can show phenomenon summary, observation focus, transition windows, and extension metrics.
+   - Missing extension metric values render as n/a.
+
+Still waiting for E02 case material
+- Real transcript / badcase description.
+- Fixed interaction_script turns.
+- Exact transition_windows.
+- E02-specific judge criteria.
+- Concrete label mapping for correction_uptake_score and prior_frame_persistence_rate.
+- Cross-model comparison narrative.
+
+E01 case draft
+- Added cases/emergent/E01_fuzzy_memory_intent_repair.yaml.
+- The case is a three-turn fixed-script emergent anomaly case.
+- Focus:
+  - fuzzy memory query
+  - premature lock onto a game-mechanism frame
+  - explicit user correction toward player/community phenomenon
+  - persistence of the prior search frame after correction
+- Added transition windows:
+  - turn 0 -> turn 1: whether the target shifts from mechanism/system to player/community phenomenon
+  - turn 1 -> turn 2: whether the target still persists in the old game-mechanism frame after reinforced correction
+- Loader check passed:
+  - load_case_spec(Path("cases"), "E01") resolves the new YAML.
+
+E01 local scripted smoke
+- Added scripts/smoke_e01_scripted_flow.py.
+- The smoke uses a fake local adapter only:
+  - no API calls
+  - no local large model loading
+  - no judge model
+- It verifies:
+  - E01 loads through the generic case loader.
+  - scripted runner executes all 3 user turns.
+  - transcript has 3 turns.
+  - observations include 2 transition windows.
+  - markdown report renders phenomenon and transition sections.
+- Command:
+  - conda run -n city-marl python scripts/smoke_e01_scripted_flow.py
+- Result:
+  - E01 scripted flow smoke: OK
+
+Actor/Judge API provider refactor
+- Design decision:
+  - Target remains the experiment variable and continues to use OpenRouter or any target provider selected by RunConfig.
+  - Actor and Judge are fixed evaluation infrastructure.
+  - Actor/Judge now come from configs/models.yaml roles, not from per-target CLI arguments.
+  - Actor/Judge are configured to use the DeepSeek official API provider, not OpenRouter.
+- configs/models.yaml:
+  - Added roles.actor and roles.judge.
+  - Added provider deepseek with kind=openai_compatible, base_url=https://api.deepseek.com, api_key_env=DEEPSEEK_API_KEY.
+  - roles.actor and roles.judge currently point to provider=deepseek, model=deepseek-v4.
+  - The DeepSeek model ID is intentionally config-level and can be adjusted to the exact non-flash v4 model ID exposed by the DeepSeek account.
+- src/adapters/router.py:
+  - Provider construction now supports arbitrary providers with kind=openai_compatible.
+  - Missing provider API keys are skipped instead of failing unrelated runs.
+- src/adapters/openai_like.py:
+  - OpenAILikeAdapter now accepts provider_name and default_model.
+  - Response provider is no longer hard-coded to openrouter.
+- src/actor/engine.py and src/judge/engine.py:
+  - ActorConfig and JudgeConfig now include provider.
+  - Requests use config.provider instead of hard-coded local/transformers.
+- src/runner/run_case.py:
+  - Reads fixed actor/judge role config from configs/models.yaml.
+  - Phase 3 uses roles.actor.
+  - Phase 4 uses roles.actor and roles.judge.
+  - Scripted Phase 4 uses roles.judge only.
+  - Missing role adapters now produce role-specific error messages.
+- scripts/run_model_suite.py:
+  - Fixed phase argument propagation into RunConfig.
+- Validation:
+  - py_compile passed for the changed Python files.
+  - conda run -n city-marl python scripts/smoke_e01_scripted_flow.py still passes without network/API/model loading.
+
+Gradio E01 chain
+- Added E01 to the Gradio case selector.
+- UI target route remains unchanged:
+  - Gradio still passes the selected target model through provider=openrouter.
+  - Actor/Judge are not UI-controlled; they come from configs/models.yaml roles.
+- For E01:
+  - Phase 2 runs the fixed script without judge.
+  - Phase 4 runs the fixed script plus the configured judge role.
+  - Actor is not involved because E01 has interaction_script.
+- ui.formatters now displays extension scores when present:
+  - correction_uptake_score
+  - prior_frame_persistence_rate
+- ui.backend now returns observations and case_spec into the UI result payload, so Show Debug can inspect transition windows and new case metadata.
+- Validation:
+  - py_compile passed for ui/app.py, ui/backend.py, ui/formatters.py.
+  - Gradio config smoke passed:
+    - E01 resolves through CASE_ID_MAP.
+    - extension metric names render in the Overview score table.
+
+DeepSeek model name update
+- Updated configs/models.yaml:
+  - roles.actor.model: deepseek-v4-pro
+  - roles.judge.model: deepseek-v4-pro
+  - providers.deepseek.default_model: deepseek-v4-pro
+- Rationale:
+  - Use non-flash DeepSeek V4 for Actor/Judge.
+- Validation:
+  - deepseek model config: OK
+
+Gradio launch compatibility
+- Updated ui/app.py for Gradio 6:
+  - Moved theme/css from Blocks(...) to launch(...).
+  - Set NO_PROXY/no_proxy for 127.0.0.1, localhost, and ::1 before launch to avoid localhost startup-event checks going through a proxy.
+- Validation:
+  - py_compile passed for ui/app.py.
+
+Provider key compatibility
+- Observed config issue:
+  - configs/models.yaml was being used as the key source directly.
+  - The router previously interpreted api_key_env strictly as an environment variable name.
+  - When a literal key was placed there, no openrouter/deepseek adapter was created.
+- Updated src/adapters/router.py:
+  - Supports provider api_key directly.
+  - Also tolerates a literal key in api_key_env for backward compatibility.
+  - Still supports the preferred env-var style.
+- Avoided unnecessary local model loading:
+  - With roles.actor/judge pointing to deepseek, build_adapters_from_config no longer loads local/transformers.
+- Validation:
+  - adapter construction now returns deepseek and openrouter without loading local model.
+
+Local secret config split
+- Removed literal API keys from configs/models.yaml.
+- configs/models.yaml now points to env var names again:
+  - OPENROUTER_API_KEY
+  - DEEPSEEK_API_KEY
+- Added config overlay support:
+  - src/adapters/router.py now loads configs/models.local.yaml automatically when present.
+  - The local file is deep-merged over configs/models.yaml.
+- Added ignored local secret file:
+  - configs/models.local.yaml
+- Added example template:
+  - configs/models.local.example.yaml
+- Existing .gitignore already ignores configs/*.local.yaml, so the real key file is not tracked.
+- Validation:
+  - git status shows configs/models.local.yaml as ignored.
+  - adapter construction still returns deepseek and openrouter using the local overlay.
+  - tracked configs contain no real sk-* key except example placeholders.

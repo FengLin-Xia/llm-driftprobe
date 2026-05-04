@@ -42,6 +42,24 @@ class ChatResponse(Dict[str, Any]):
 class BaseChatAdapter(ABC):
     """所有外部/本地模型适配器的抽象基类。"""
 
+    provider_name: str = "unknown"
+    model_name: str = "unknown"
+    supports_stream: bool = False
+    supports_tools: bool = False
+    supports_search: bool = False
+    supports_reasoning_summary: bool = False
+
+    @property
+    def metadata(self) -> Dict[str, Any]:
+        return {
+            "provider_name": self.provider_name,
+            "model_name": self.model_name,
+            "supports_stream": self.supports_stream,
+            "supports_tools": self.supports_tools,
+            "supports_search": self.supports_search,
+            "supports_reasoning_summary": self.supports_reasoning_summary,
+        }
+
     @abstractmethod
     async def chat(self, request: ChatRequest, *, timeout: Optional[float] = None) -> ChatResponse:
         raise NotImplementedError

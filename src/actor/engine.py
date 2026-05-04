@@ -11,6 +11,7 @@ from .prompt import ACTOR_SYSTEM_PROMPT
 @dataclass
 class ActorConfig:
     model: str
+    provider: str = "local/transformers"
 
 
 class ActorEngine:
@@ -98,7 +99,7 @@ Case 目标：
 
         resp = await self._adapter.chat(
             {
-                "provider": "local/transformers",
+                "provider": self._config.provider,
                 "model": self._config.model,
                 "messages": messages,
                 "temperature": 0.35,
@@ -146,7 +147,7 @@ Case 目标：
             ]
             retry_resp = await self._adapter.chat(
                 {
-                    "provider": "local/transformers",
+                    "provider": self._config.provider,
                     "model": self._config.model,
                     "messages": retry_messages,
                     "temperature": 0.65,

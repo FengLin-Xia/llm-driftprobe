@@ -105,7 +105,8 @@ def _normalize_run_result(raw: Dict[str, Any], target_model: str, phase: int, te
         normalized.setdefault("turn", i)
         turn_labels.append(normalized)
 
-    scores = compute_case_metrics(raw_labels)
+    case_spec = raw.get("case_spec", {}) or {}
+    scores = compute_case_metrics(raw_labels, extension_metrics=case_spec.get("extension_metrics", []) or [])
     has_labels = len(raw_labels) > 0
     failure_mode = _infer_failure_mode(scores, has_labels)
     summary = _build_summary(scores, raw.get("case_id", ""), raw.get("status", ""), has_labels)
@@ -133,6 +134,8 @@ def _normalize_run_result(raw: Dict[str, Any], target_model: str, phase: int, te
         "failure_mode":    failure_mode,
         "transcript":      transcript,
         "turn_labels":     turn_labels,
+        "observations":    raw.get("observations", []),
+        "case_spec":       raw.get("case_spec", {}),
         "report_markdown": report_md,
         "_mock":           False,
     }

@@ -46,6 +46,12 @@ class TransformersLocalAdapter(BaseChatAdapter):
     ) -> None:
         self._model_name_or_path = model_name_or_path
         self._default_max_new_tokens = default_max_new_tokens
+        self.provider_name = "local/transformers"
+        self.model_name = model_name_or_path
+        self.supports_stream = False
+        self.supports_tools = False
+        self.supports_search = False
+        self.supports_reasoning_summary = False
 
         if device == "auto":
             self._device = "cuda" if torch.cuda.is_available() else "cpu"

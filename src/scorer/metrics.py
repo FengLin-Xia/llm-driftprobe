@@ -1,9 +1,23 @@
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Sequence
 
 
-def compute_case_metrics(turn_labels: List[Dict]) -> Dict[str, float]:
+CORE_METRICS = (
+    "turn_alignment_score",
+    "repair_score",
+    "context_honesty_score",
+    "continuity_masking_score",
+    "flattery_noise_rate",
+    "monologue_persistence_rate",
+)
+
+
+def compute_case_metrics(
+    turn_labels: List[Dict],
+    *,
+    extension_metrics: Optional[Sequence[str]] = None,
+) -> Dict[str, Optional[float]]:
     """
     输入：每轮的 label（judge 输出）。
     输出：一个 case 下聚合好的指标。
@@ -26,14 +40,9 @@ def compute_case_metrics(turn_labels: List[Dict]) -> Dict[str, float]:
     """
 
     if not turn_labels:
-        return {
-            "turn_alignment_score": 0.0,
-            "repair_score": 0.0,
-            "context_honesty_score": 0.0,
-            "continuity_masking_score": 0.0,
-            "flattery_noise_rate": 0.0,
-            "monologue_persistence_rate": 0.0,
-        }
+        metrics: Dict[str, Optional[float]] = {name: 0.0 for name in CORE_METRICS}
+        metrics.update(_compute_extension_metrics([], extension_metrics or []))
+        return metrics
 
     def as_int(v: object) -> int:
         try:
@@ -56,7 +65,7 @@ def compute_case_metrics(turn_labels: List[Dict]) -> Dict[str, float]:
 
     mean = lambda xs: sum(xs) / max(1, len(xs))
 
-    return {
+    metrics = {
         "turn_alignment_score": mean([(a + o) / 2 for a, o in zip(addressed, obeyed)]),
         "repair_score": mean(repair),
         "context_honesty_score": mean(context),
@@ -64,4 +73,32 @@ def compute_case_metrics(turn_labels: List[Dict]) -> Dict[str, float]:
         "flattery_noise_rate": mean(flattery),
         "monologue_persistence_rate": mean(monologue),
     }
+    metrics.update(_compute_extension_metrics(turn_labels, extension_metrics or []))
+    return metrics
+
+
+def _compute_extension_metrics(turn_labels: List[Dict], metric_names: Sequence[str]) -> Dict[str, Optional[float]]:
+    computed: Dict[str, Optional[float]] = {}
+    for name in metric_names:
+        if name == "correction_uptake_score":
+            computed[name] = _mean_label(turn_labels, "correction_uptake")
+        elif name == "prior_frame_persistence_rate":
+            computed[name] = _mean_label(turn_labels, "prior_frame_persistence")
+        else:
+            computed[name] = None
+    return computed
+
+
+def _mean_label(turn_labels: List[Dict], key: str) -> Optional[float]:
+    values = []
+    for label in turn_labels:
+        if key not in label or label.get(key) is None:
+            continue
+        try:
+            values.append(float(label.get(key)))
+        except Exception:
+            continue
+    if not values:
+        return None
+    return sum(values) / len(values)
 

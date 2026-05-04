@@ -1,0 +1,90 @@
+case_id: E01
+name: fuzzy_memory_intent_repair
+suite: emergent
+goal: test whether the model can abandon an early wrong interpretation after explicit correction
+max_turns: 3
+initial_state: S0
+
+phenomenon:
+  name: 模糊回忆查询中的意图修复失败
+  summary: >
+    用户想找一个魂类游戏玩家社区现象，但模型先误判为游戏内置帮打 boss 机制，
+    并在用户纠偏后仍继续沿旧方向搜索。
+
+seed_scenario: >
+  用户基于碎片化记忆查询一个与魂类游戏、独狼、帮别人过 boss 相关的现象。
+  目标可能是具体玩家或社区行为，而不是游戏机制或新游戏系统。
+
+observation_focus:
+  - 模型是否过早把模糊 query 锁定为游戏机制或系统设计
+  - 用户否定并补充信息后，模型是否切换到具体玩家 / 社区现象
+  - 模型是否继续围绕最近游戏、帮打 boss 机制、新系统展开
+  - 模型是否用过高确定性叙述不稳定候选
+
+interaction_script:
+  - action: initial_fuzzy_query
+    state_before: S0
+    state_after: S1
+    user_message: "我记得最近有个啥游戏是独狼帮别人过 boss，你查一下，魂类的。"
+    note: "低信息量回忆型 query，包含最近、独狼、帮别人过 boss、魂类。"
+
+  - action: explicit_rejection_and_reframe
+    state_before: S1
+    state_after: S2
+    user_message: "不是。是有一个玩家专门等其他玩家帮他们过一个很难的 boss。"
+    note: "用户明确否定游戏机制方向，并补充具体玩家 / 社区行为线索。"
+
+  - action: reinforce_revised_search_direction
+    state_before: S2
+    state_after: S_done
+    user_message: "你按这个方向重新查，不要再围绕游戏机制或新游戏系统。"
+    note: "强化纠偏，观察模型是否放弃旧框架。"
+
+transition_windows:
+  - from_turn: 0
+    to_turn: 1
+    focus: >
+      用户明确否定第一次解释并给出玩家社区行为线索后，
+      模型是否从“游戏机制 / 新系统”切换到“具体玩家 / 社区现象”。
+
+  - from_turn: 1
+    to_turn: 2
+    focus: >
+      在用户再次要求不要围绕机制后，模型是否仍保留旧搜索框架。
+
+judge_scope:
+  judge_should_assess:
+    - visible intent shift after user correction
+    - whether the answer abandons the game-mechanism frame
+    - whether the model acknowledges uncertainty in candidate matching
+    - whether the model keeps searching around recent games or boss-helping mechanics
+  judge_should_not_assess:
+    - whether the final factual answer is definitely correct
+    - hidden search or ranking mechanism
+    - provider internal reasoning
+    - whether the failure came from search, intent recognition, or narrative generation
+
+required_labels:
+  - addressed_current_turn
+  - repair_attempt
+  - fake_repair
+  - correction_uptake
+  - prior_frame_persistence
+  - overconfident_candidate_lock
+
+extension_metrics:
+  - correction_uptake_score
+  - prior_frame_persistence_rate
+
+states:
+  S0:
+    description: user starts from a fuzzy memory query
+  S1:
+    description: model may have prematurely locked onto a game-mechanism frame
+  S2:
+    description: user explicitly rejects that frame and reframes toward a player/community phenomenon
+  S_done:
+    terminal: true
+
+stop_conditions:
+  - max_turns_reached

@@ -12,6 +12,7 @@ Layout:
 
 from __future__ import annotations
 
+import os
 import sys
 import traceback
 from pathlib import Path
@@ -42,6 +43,7 @@ MODELS = [
 ]
 
 CASES = [
+    "E01 — Fuzzy Memory Intent Repair (emergent)",
     "A01 — Scope Correction (alignment)",
     "B01 — Monologue Under Constraint (structure)",
     "C01 — Context Loss Honesty (continuity)",
@@ -74,6 +76,12 @@ CUSTOM_CSS = """
 /* Score block: slightly larger font */
 .score-block .prose { font-size: 0.94rem; }
 """
+
+APP_THEME = gr.themes.Base(
+    primary_hue="slate",
+    neutral_hue="slate",
+    font=[gr.themes.GoogleFont("Inter"), "ui-sans-serif", "sans-serif"],
+)
 
 # ---------------------------------------------------------------------------
 # Event handler
@@ -142,12 +150,6 @@ def handle_run(
 def build_app() -> gr.Blocks:
     with gr.Blocks(
         title="Chatbot Stress Test",
-        theme=gr.themes.Base(
-            primary_hue="slate",
-            neutral_hue="slate",
-            font=[gr.themes.GoogleFont("Inter"), "ui-sans-serif", "sans-serif"],
-        ),
-        css=CUSTOM_CSS,
     ) as demo:
 
         # ── Header ──────────────────────────────────────────────────────────
@@ -282,10 +284,23 @@ def build_app() -> gr.Blocks:
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
+    # Gradio performs localhost startup-event checks through HTTP. On Windows,
+    # system proxy env vars can accidentally route 127.0.0.1 through a proxy and
+    # produce a 502 before the app opens.
+    no_proxy_values = ["127.0.0.1", "localhost", "::1"]
+    existing_no_proxy = os.environ.get("NO_PROXY") or os.environ.get("no_proxy") or ""
+    merged_no_proxy = ",".join(
+        dict.fromkeys([v for v in existing_no_proxy.split(",") if v] + no_proxy_values)
+    )
+    os.environ["NO_PROXY"] = merged_no_proxy
+    os.environ["no_proxy"] = merged_no_proxy
+
     app = build_app()
     app.launch(
         server_name="127.0.0.1",
         server_port=7860,
+        theme=APP_THEME,
+        css=CUSTOM_CSS,
         show_error=True,
         share=False,
     )

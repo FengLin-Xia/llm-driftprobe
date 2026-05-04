@@ -6,7 +6,7 @@ from typing import Any, Dict, List
 
 import yaml
 
-from ..adapters.router import build_adapters_from_config
+from ..adapters.router import build_adapters_from_config, load_model_config
 
 
 @dataclass
@@ -81,23 +81,85 @@ def _diversify_if_repeated(current: str, previous: str, chosen_action: str, turn
 
 
 def load_case_spec(case_root: Path, case_id: str) -> Dict[str, Any]:
-    # v0 简化：根据 case_id 推断路径
-    # A01 -> cases/alignment/A01_scope_correction.yaml
-    # B01 -> cases/structure/B01_monologue_under_short_answer.yaml
-    # C01 -> cases/continuity/C01_context_loss_honesty.yaml
-    # D01 -> cases/alignment/D01_flattery_pollution.yaml
-    mapping = {
-        "A01": case_root / "alignment" / "A01_scope_correction.yaml",
-        "B01": case_root / "structure" / "B01_monologue_under_short_answer.yaml",
-        "C01": case_root / "continuity" / "C01_context_loss_honesty.yaml",
-        "D01": case_root / "alignment" / "D01_flattery_pollution.yaml",
-    }
-    path = mapping.get(case_id)
-    if not path or not path.exists():
-        raise FileNotFoundError(f"Case spec not found for id={case_id}")
+    matches: List[Path] = []
+    for path in case_root.rglob("*.yaml"):
+        with path.open("r", encoding="utf-8") as f:
+            spec = yaml.safe_load(f) or {}
+        if str(spec.get("case_id", "")).strip() == case_id:
+            matches.append(path)
+
+    if not matches:
+        raise FileNotFoundError(f"Case spec not found for id={case_id} under {case_root}")
+
+    if len(matches) > 1:
+        joined = ", ".join(str(p.relative_to(case_root)) for p in matches)
+        raise RuntimeError(f"Duplicate case_id={case_id} in case specs: {joined}")
+
+    path = matches[0]
 
     with path.open("r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
+        return yaml.safe_load(f) or {}
+
+
+def _script_turn_message(step: Any) -> str:
+    if isinstance(step, str):
+        return step
+    if isinstance(step, dict):
+        for key in ("user_message", "message", "content"):
+            value = step.get(key)
+            if value:
+                return str(value)
+    raise ValueError(f"Invalid interaction_script step: {step!r}")
+
+
+def _script_turn_meta(step: Any) -> Dict[str, Any]:
+    if not isinstance(step, dict):
+        return {}
+    return {
+        "script_action": step.get("action", ""),
+        "script_note": step.get("note", ""),
+        "state_before": step.get("state_before", ""),
+        "state_after": step.get("state_after", ""),
+    }
+
+
+def _transition_observations_from_spec(case_spec: Dict[str, Any]) -> List[Dict[str, Any]]:
+    observations: List[Dict[str, Any]] = []
+    for window in case_spec.get("transition_windows", []) or []:
+        if not isinstance(window, dict):
+            continue
+        observation = {
+            "unit": "transition",
+            "from_turn": window.get("from_turn"),
+            "to_turn": window.get("to_turn"),
+            "focus": window.get("focus", window.get("observation_focus", "")),
+            "labels": {},
+            "evidence": [],
+            "source": "case_spec",
+        }
+        observations.append(observation)
+    return observations
+
+
+def _role_config(configs_root: Path, role: str) -> Dict[str, str]:
+    cfg = load_model_config(str(configs_root / "models.yaml"))
+    role_cfg = (cfg.get("roles") or {}).get(role) or {}
+    local_models_cfg = cfg.get("local_models", {})
+    local_role_cfg = local_models_cfg.get(role) or {}
+
+    return {
+        "provider": str(role_cfg.get("provider") or "local/transformers"),
+        "model": str(role_cfg.get("model") or local_role_cfg.get("model_name_or_path") or "local"),
+    }
+
+
+def _require_adapter(adapters: Dict[str, Any], provider: str, *, role: str) -> Any:
+    if provider not in adapters:
+        raise RuntimeError(
+            f"Missing adapter for {role} provider={provider}. "
+            f"Available={list(adapters.keys())}. Check configs/models.yaml and env API keys."
+        )
+    return adapters[provider]
 
 
 async def run_single_case(run_cfg: RunConfig) -> Dict[str, Any]:
@@ -115,6 +177,8 @@ async def run_single_case(run_cfg: RunConfig) -> Dict[str, Any]:
     configs_root = project_root / "configs"
 
     case_spec = load_case_spec(case_root, run_cfg.case_id)
+    actor_role = _role_config(configs_root, "actor")
+    judge_role = _role_config(configs_root, "judge")
 
     adapters = build_adapters_from_config(str(configs_root / "models.yaml"))
     if run_cfg.provider not in adapters:
@@ -139,13 +203,75 @@ async def run_single_case(run_cfg: RunConfig) -> Dict[str, Any]:
     conversation: List[Dict[str, Any]] = [{"role": "system", "content": system_prompt}]
     transcript: List[Dict[str, Any]] = []
     all_labels: List[Dict[str, Any]] = []
+    observations: List[Dict[str, Any]] = []
 
     # 生成参数先用保守值，降低测试成本和波动（后续可从 runtime.yaml 读取）
     temperature = 0.2
     # 提速：目标模型输出更短，减少 actor/judge 的 prompt 输入长度
     max_tokens = 200
 
-    if run_cfg.phase == 2:
+    if case_spec.get("interaction_script"):
+        script_steps = list(case_spec.get("interaction_script") or [])
+        max_turns = min(len(script_steps), int(case_spec.get("max_turns", len(script_steps))))
+
+        judge = None
+        if run_cfg.phase >= 4:
+            from ..judge.engine import JudgeConfig, JudgeEngine
+
+            judge_adapter = _require_adapter(adapters, judge_role["provider"], role="judge")
+            judge_cfg = JudgeConfig(
+                provider=judge_role["provider"],
+                model=case_spec.get("judge_model", judge_role["model"]),
+            )
+            judge = JudgeEngine(judge_adapter, judge_cfg)
+
+        for turn_index, step in enumerate(script_steps[:max_turns]):
+            user_message = _script_turn_message(step)
+            meta = _script_turn_meta(step)
+
+            conversation.append({"role": "user", "content": user_message})
+            resp = await target_adapter.chat(
+                {
+                    "provider": run_cfg.provider,
+                    "model": run_cfg.model,
+                    "messages": conversation,
+                    "temperature": temperature,
+                    "max_tokens": max_tokens,
+                }
+            )
+            assistant_message = resp["content"]
+            conversation.append({"role": "assistant", "content": assistant_message})
+
+            transcript_entry = {
+                "turn_index": turn_index,
+                "user_message": user_message,
+                "assistant_message": assistant_message,
+                **{k: v for k, v in meta.items() if v},
+            }
+            transcript.append(transcript_entry)
+
+            if judge is not None:
+                labels = await judge.label_turn(
+                    case_id=run_cfg.case_id,
+                    turn_index=turn_index,
+                    transcript_snippet=transcript[-2:],
+                )
+                all_labels.append(labels)
+                transcript_entry["labels"] = labels
+                observations.append(
+                    {
+                        "unit": "turn",
+                        "turn_index": turn_index,
+                        "labels": labels,
+                        "evidence": labels.get("evidence", []),
+                        "source": "judge",
+                    }
+                )
+
+        observations.extend(_transition_observations_from_spec(case_spec))
+        status = "scripted_case_completed"
+
+    elif run_cfg.phase == 2:
         if run_cfg.case_id not in preset_user_turns:
             raise NotImplementedError(f"Phase2 only preset implements A01, but got {run_cfg.case_id}")
 
@@ -176,14 +302,14 @@ async def run_single_case(run_cfg: RunConfig) -> Dict[str, Any]:
 
     elif run_cfg.phase == 3:
         # 接入 actor：用本地模型生成每轮 user_message（但仍不打标签）
-        if "local/transformers" not in adapters:
-            raise RuntimeError("Missing local adapter local/transformers for phase3.")
-
         from ..actor.engine import ActorConfig, ActorEngine
 
-        local_actor_adapter = adapters["local/transformers"]
-        actor_cfg = ActorConfig(model=case_spec.get("actor_model", "local"))
-        actor = ActorEngine(local_actor_adapter, actor_cfg)
+        actor_adapter = _require_adapter(adapters, actor_role["provider"], role="actor")
+        actor_cfg = ActorConfig(
+            provider=actor_role["provider"],
+            model=case_spec.get("actor_model", actor_role["model"]),
+        )
+        actor = ActorEngine(actor_adapter, actor_cfg)
 
         current_state = case_spec["initial_state"]
         allowed_actions = case_spec.get("allowed_actions", [])
@@ -252,18 +378,22 @@ async def run_single_case(run_cfg: RunConfig) -> Dict[str, Any]:
 
     elif run_cfg.phase == 4:
         # Phase 4：接入 judge 打标签 + 生成可计算的 turn_labels
-        if "local/transformers" not in adapters:
-            raise RuntimeError("Missing local adapter local/transformers for phase4.")
-
         from ..actor.engine import ActorConfig, ActorEngine
         from ..judge.engine import JudgeConfig, JudgeEngine
 
-        local_adapter = adapters["local/transformers"]
-        actor_cfg = ActorConfig(model=case_spec.get("actor_model", "local"))
-        judge_cfg = JudgeConfig(model=case_spec.get("judge_model", "local"))
+        actor_adapter = _require_adapter(adapters, actor_role["provider"], role="actor")
+        judge_adapter = _require_adapter(adapters, judge_role["provider"], role="judge")
+        actor_cfg = ActorConfig(
+            provider=actor_role["provider"],
+            model=case_spec.get("actor_model", actor_role["model"]),
+        )
+        judge_cfg = JudgeConfig(
+            provider=judge_role["provider"],
+            model=case_spec.get("judge_model", judge_role["model"]),
+        )
 
-        actor = ActorEngine(local_adapter, actor_cfg)
-        judge = JudgeEngine(local_adapter, judge_cfg)
+        actor = ActorEngine(actor_adapter, actor_cfg)
+        judge = JudgeEngine(judge_adapter, judge_cfg)
 
         current_state = case_spec["initial_state"]
         allowed_actions = case_spec.get("allowed_actions", [])
@@ -350,6 +480,7 @@ async def run_single_case(run_cfg: RunConfig) -> Dict[str, Any]:
         "turn_count": len(transcript),
         "transcript": transcript,
         "turn_labels": all_labels,
+        "observations": observations,
         "case_spec": case_spec,
     }
 

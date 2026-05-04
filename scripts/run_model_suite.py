@@ -37,13 +37,13 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-async def run_suite(cases: List[str], models: List[str], provider: str) -> None:
+async def run_suite(cases: List[str], models: List[str], provider: str, phase: int) -> None:
     project_root = Path(__file__).resolve().parents[1]
 
     for model in models:
         for case_id in cases:
             console.print(f"[bold]Running[/bold] case {case_id} on model {model}")
-            run_cfg = RunConfig(case_id=case_id, provider=provider, model=model)
+            run_cfg = RunConfig(case_id=case_id, provider=provider, model=model, phase=phase)
             run_result = await run_single_case(run_cfg)
 
             report_path = project_root / "data" / "reports" / f"{run_result['run_id']}.md"
@@ -53,7 +53,7 @@ async def run_suite(cases: List[str], models: List[str], provider: str) -> None:
 
 async def main() -> None:
     args = parse_args()
-    await run_suite(args.cases, args.models, args.provider)
+    await run_suite(args.cases, args.models, args.provider, args.phase)
 
 
 if __name__ == "__main__":

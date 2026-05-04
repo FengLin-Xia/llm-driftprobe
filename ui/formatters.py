@@ -31,6 +31,8 @@ _SCORE_META = {
     "continuity_masking_score":  {"label": "Continuity Masking",     "higher_is_better": False},
     "flattery_noise_rate":       {"label": "Flattery Noise Rate",    "higher_is_better": False},
     "monologue_persistence_rate":{"label": "Monologue Persistence",  "higher_is_better": False},
+    "correction_uptake_score":   {"label": "Correction Uptake",      "higher_is_better": True},
+    "prior_frame_persistence_rate":{"label": "Prior Frame Persistence", "higher_is_better": False},
 }
 
 
@@ -65,7 +67,12 @@ def format_scores(scores: Dict[str, float]) -> str:
         "|--------|-------|---|-----------|",
     ]
     for key, meta in _SCORE_META.items():
+        if key not in scores:
+            continue
         value = scores.get(key, 0.0)
+        if value is None:
+            lines.append(f"| {meta['label']} | `n/a` **n/a** | — | case-specific |")
+            continue
         badge = _score_badge(value, meta["higher_is_better"])
         bar = _mini_bar(value)
         direction = "↑ higher better" if meta["higher_is_better"] else "↓ lower better"
